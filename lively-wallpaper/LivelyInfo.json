@@ -1,0 +1,12 @@
+{
+  "AppVersion": "1.0.0.0",
+  "Title": "Bicycle Gear Clock",
+  "Thumbnail": "preview.jpg",
+  "Preview": "preview.gif",
+  "Desc": "Animated bicycle drivetrain clock",
+  "Author": "Your Name",
+  "License": "MIT",
+  "Contact": "https://github.com/YOUR_USERNAME",
+  "Type": 1,
+  "FileName": "bicycle-gear-clock.html"
+}
