@@ -81,6 +81,9 @@ To customize colors or behavior, edit `bicycle-gear-clock.html`:
 
 ![Full View](screenshots/preview.png)
 
+## 🎮 Live Demo
+Try it in your browser: [View Live Demo](https://jwolf842.github.io/bicycle-gear-clock/bicycle-gear-clock.html)
+
 ## 🤝 Contributing
 
 Feel free to fork this repository and submit pull requests with improvements!
