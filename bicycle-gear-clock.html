@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic Bicycle Gear Clock</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+            filter: drop-shadow(0 10px 30px rgba(0,0,0,0.3));
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 15px;
+            backdrop-filter: blur(10px);
+        }
+        #info .time {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #FFD700;
+        }
+        #info .gear-info {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="bikeCanvas"></canvas>
+    <div id="info">
+        <div class="time" id="digitalTime"></div>
+        <div class="gear-info" id="gearInfo"></div>
+    </div>
+
+
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('bikeCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Clock and animation variables
+        let currentHour = 1;
+        let currentMinuteSegment = 0;
+        let animating = false;
+        let animationProgress = 0;
+        let wheelRotation = 0;
+        let chainringRotation = 0;
+        let chainPosition = 0;
+        let lastTime = { hour: -1, minuteSegment: -1 };
+
+        // Enhanced bike geometry - rear on left, front on right
+        const bike = {
+            scale: 2.2,  // Increased from 1.5 for better visibility
+            rearCassette: { 
+                x: -180,  // Adjusted spacing for larger scale
+                y: 0,
+                cogs: []
+            },
+            frontChainrings: { 
+                x: 180,   // Adjusted spacing for larger scale
+                y: 0,
+                cogs: []
+            }
+        };
+
+        // Initialize realistic cassette cogs
+        function initializeCogs() {
+            // Rear cassette - 12 cogs with realistic sizing (11-36T)
+            const rearSizes = [
+                { radius: 14, teeth: 11, thickness: 2.5 },
+                { radius: 16, teeth: 12, thickness: 2.5 },
+                { radius: 18, teeth: 13, thickness: 2.5 },
+                { radius: 20, teeth: 14, thickness: 2.5 },
+                { radius: 23, teeth: 16, thickness: 2.5 },
+                { radius: 26, teeth: 18, thickness: 2.5 },
+                { radius: 29, teeth: 20, thickness: 2.5 },
+                { radius: 32, teeth: 22, thickness: 2.5 },
+                { radius: 36, teeth: 25, thickness: 2.5 },
+                { radius: 40, teeth: 28, thickness: 2.5 },
+                { radius: 44, teeth: 32, thickness: 2.5 },
+                { radius: 48, teeth: 36, thickness: 2.5 }
+            ];
+
+            for (let i = 0; i < 12; i++) {
+                bike.rearCassette.cogs.push({
+                    ...rearSizes[i],
+                    hour: i + 1,
+                    zOffset: i * 4 // Stacking offset for 3D effect
+                });
+            }
+
+            // Front chainrings - 3 rings with realistic sizing (30/39/52T)
+            const frontSizes = [
+                { radius: 38, teeth: 30, thickness: 3 },
+                { radius: 48, teeth: 39, thickness: 3 },
+                { radius: 58, teeth: 52, thickness: 3 }
+            ];
+
+            for (let i = 0; i < 3; i++) {
+                bike.frontChainrings.cogs.push({
+                    ...frontSizes[i],
+                    minutes: i * 20,
+                    zOffset: i * 8  // Wider spacing for chainrings
+                });
+            }
+        }
+
+        // Draw realistic cassette with multiple visible cogs
+        function drawCassette(x, y, cogs, activeIndex, rotation, isFront) {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Draw from back to front for proper layering
+            for (let i = cogs.length - 1; i >= 0; i--) {
+                const cog = cogs[i];
+                const isActive = i === activeIndex;
+                
+                // 3D offset effect - adjusted for left/right positioning
+                const offsetX = isFront ? cog.zOffset * 0.8 : -cog.zOffset * 0.8;
+                const offsetY = cog.zOffset * 0.3;
+                
+                drawRealisticCog(
+                    centerX + x + offsetX,
+                    centerY + y + offsetY,
+                    cog.radius * bike.scale,
+                    cog.teeth,
+                    cog.thickness * bike.scale,
+                    rotation,
+                    isActive,
+                    isFront,
+                    i
+                );
+            }
+        }
+
+        // Draw a realistic cog with proper shading and details
+        function drawRealisticCog(x, y, radius, teeth, thickness, rotation, isActive, isFront, index) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+
+            // Create metallic gradient with alternating colors for rear cassette
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+            if (isActive) {
+                // Active gear - always gold
+                gradient.addColorStop(0, '#FFE4B5');
+                gradient.addColorStop(0.5, '#FFD700');
+                gradient.addColorStop(1, '#DAA520');
+            } else if (!isFront) {
+                // Rear cassette - alternate colors for better visibility
+                if ((index + 1) % 2 === 0) {
+                    // Even numbered cogs (2, 4, 6, 8, 10, 12) - darker
+                    gradient.addColorStop(0, '#707070');
+                    gradient.addColorStop(0.5, '#505050');
+                    gradient.addColorStop(1, '#404040');
+                } else {
+                    // Odd numbered cogs (1, 3, 5, 7, 9, 11) - lighter
+                    gradient.addColorStop(0, '#E0E0E0');
+                    gradient.addColorStop(0.5, '#B0B0B0');
+                    gradient.addColorStop(1, '#808080');
+                }
+            } else {
+                // Front chainrings - keep original light gray
+                gradient.addColorStop(0, '#E0E0E0');
+                gradient.addColorStop(0.5, '#B0B0B0');
+                gradient.addColorStop(1, '#808080');
+            }
+
+            // Draw main gear body
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // Draw edge for thickness effect
+            ctx.strokeStyle = isActive ? '#B8860B' : (!isFront && (index + 1) % 2 === 0) ? '#303030' : '#606060';
+            ctx.lineWidth = thickness;
+            ctx.stroke();
+            
+            // Add thin black outline for light gray rear cassette cogs
+            if (!isFront && !isActive && (index + 1) % 2 !== 0) {
+                ctx.beginPath();
+                ctx.arc(0, 0, radius + thickness/2, 0, Math.PI * 2);
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Draw teeth with realistic profile
+            const toothAngle = (Math.PI * 2) / teeth;
+            const toothHeight = radius * 0.12;
+            const toothWidth = 0.35;
+            
+            ctx.beginPath();
+            for (let i = 0; i < teeth; i++) {
+                const angle = i * toothAngle;
+                
+                // Tooth profile points
+                const innerRadius = radius;
+                const outerRadius = radius + toothHeight;
+                
+                // Leading edge of tooth
+                const x1 = Math.cos(angle - toothAngle * toothWidth) * innerRadius;
+                const y1 = Math.sin(angle - toothAngle * toothWidth) * innerRadius;
+                
+                // Tooth tip (slightly rounded)
+                const x2 = Math.cos(angle - toothAngle * 0.15) * outerRadius;
+                const y2 = Math.sin(angle - toothAngle * 0.15) * outerRadius;
+                const x3 = Math.cos(angle) * (outerRadius + 1);
+                const y3 = Math.sin(angle) * (outerRadius + 1);
+                const x4 = Math.cos(angle + toothAngle * 0.15) * outerRadius;
+                const y4 = Math.sin(angle + toothAngle * 0.15) * outerRadius;
+                
+                // Trailing edge of tooth
+                const x5 = Math.cos(angle + toothAngle * toothWidth) * innerRadius;
+                const y5 = Math.sin(angle + toothAngle * toothWidth) * innerRadius;
+
+                if (i === 0) {
+                    ctx.moveTo(x1, y1);
+                } else {
+                    ctx.lineTo(x1, y1);
+                }
+                
+                // Create tooth shape
+                ctx.lineTo(x2, y2);
+                ctx.quadraticCurveTo(x3, y3, x4, y4);
+                ctx.lineTo(x5, y5);
+                
+                // Valley between teeth
+                const nextAngle = angle + toothAngle;
+                const valleyX = Math.cos(nextAngle - toothAngle * toothWidth) * innerRadius;
+                const valleyY = Math.sin(nextAngle - toothAngle * toothWidth) * innerRadius;
+                ctx.quadraticCurveTo(
+                    Math.cos(angle + toothAngle * 0.5) * (innerRadius - 2),
+                    Math.sin(angle + toothAngle * 0.5) * (innerRadius - 2),
+                    valleyX, 
+                    valleyY
+                );
+            }
+            
+            ctx.closePath();
+            
+            // Adjust teeth color based on cog type
+            if (isActive) {
+                ctx.fillStyle = '#FFA500';
+            } else if (!isFront && (index + 1) % 2 === 0) {
+                ctx.fillStyle = '#606060'; // Darker teeth for even rear cogs
+            } else {
+                ctx.fillStyle = '#909090'; // Lighter teeth
+            }
+            ctx.fill();
+            ctx.strokeStyle = isActive ? '#FF8C00' : (!isFront && (index + 1) % 2 === 0) ? '#303030' : '#505050';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            // Center hub with splines
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.35, 0, Math.PI * 2);
+            
+            const hubGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.35);
+            hubGradient.addColorStop(0, '#404040');
+            hubGradient.addColorStop(1, '#202020');
+            ctx.fillStyle = hubGradient;
+            ctx.fill();
+            
+            // Draw splines in hub
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(angle) * radius * 0.15, Math.sin(angle) * radius * 0.15);
+                ctx.lineTo(Math.cos(angle) * radius * 0.3, Math.sin(angle) * radius * 0.3);
+                ctx.stroke();
+            }
+
+            // Add shimmer effect for active cog
+            if (isActive) {
+                ctx.globalAlpha = 0.3;
+                ctx.beginPath();
+                ctx.arc(0, -radius * 0.6, radius * 0.3, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            // Add teeth count label for active cog
+            if (isActive) {
+                ctx.font = 'bold 14px Arial';
+                ctx.fillStyle = '#FFFFFF';
+                ctx.textAlign = 'center';
+                ctx.globalAlpha = 0.8;
+                ctx.fillText(teeth + 'T', 0, 0);
+                ctx.globalAlpha = 1;
+            }
+
+            ctx.restore();
+        }
+
+        // Draw realistic chain with proper clockwise movement
+        function drawChain() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Get active cogs
+            const rearCog = bike.rearCassette.cogs[currentHour - 1];
+            const frontCog = bike.frontChainrings.cogs[currentMinuteSegment];
+
+            // Calculate positions with z-offset
+            const rearX = centerX + bike.rearCassette.x - rearCog.zOffset * 0.8;
+            const rearY = centerY + bike.rearCassette.y + rearCog.zOffset * 0.3;
+            const frontX = centerX + bike.frontChainrings.x + frontCog.zOffset * 0.8;
+            const frontY = centerY + bike.frontChainrings.y + frontCog.zOffset * 0.3;
+            
+            const rearRadius = rearCog.radius * bike.scale;
+            const frontRadius = frontCog.radius * bike.scale;
+
+            // Calculate chain path geometry
+            const dx = frontX - rearX;
+            const dy = frontY - rearY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Calculate tangent angles
+            const centerAngle = Math.atan2(dy, dx);
+            const radiusDiff = frontRadius - rearRadius;
+            const tangentAngle = Math.asin(radiusDiff / distance);
+            
+            // Chain wrap angles
+            const rearTopAngle = centerAngle - Math.PI/2 + tangentAngle;
+            const rearBottomAngle = centerAngle + Math.PI/2 + tangentAngle;
+            const frontTopAngle = centerAngle - Math.PI/2 + tangentAngle;
+            const frontBottomAngle = centerAngle + Math.PI/2 + tangentAngle;
+            
+            // Calculate chain path points
+            const rearTopX = rearX + Math.cos(rearTopAngle) * rearRadius;
+            const rearTopY = rearY + Math.sin(rearTopAngle) * rearRadius;
+            const rearBottomX = rearX + Math.cos(rearBottomAngle) * rearRadius;
+            const rearBottomY = rearY + Math.sin(rearBottomAngle) * rearRadius;
+            const frontTopX = frontX + Math.cos(frontTopAngle) * frontRadius;
+            const frontTopY = frontY + Math.sin(frontTopAngle) * frontRadius;
+            const frontBottomX = frontX + Math.cos(frontBottomAngle) * frontRadius;
+            const frontBottomY = frontY + Math.sin(frontBottomAngle) * frontRadius;
+            
+
+            // Calculate total chain length
+            const straightLength = distance * 2;
+            const wrapLength = Math.PI * (rearRadius + frontRadius);
+            const totalLength = straightLength + wrapLength;
+            
+            // Chain link parameters
+            const linkPitch = 10; // Adjusted for new scale
+            const numLinks = Math.floor(totalLength / linkPitch);
+            
+            // Synchronize chain position with gear rotation
+            // Chain moves the same linear distance as the gear circumference rotation
+            chainPosition = (wheelRotation / (Math.PI * 2)) % 1;
+            if (chainPosition < 0) chainPosition += 1;
+            
+            // Draw chain links
+            for (let i = 0; i < numLinks; i++) {
+                // Calculate position along chain (0 to 1) - positive for clockwise
+                let t = ((i / numLinks) + chainPosition) % 1;
+                
+                let linkX, linkY, linkAngle;
+                
+                // Determine which section of chain this link is on
+                // For clockwise movement: top moves right, bottom moves left
+                const topRunLength = distance / totalLength;
+                const frontWrapLength = (Math.PI * frontRadius) / totalLength;
+                const bottomRunLength = distance / totalLength;
+                const rearWrapLength = (Math.PI * rearRadius) / totalLength;
+                
+                if (t < topRunLength) {
+                    // Top run - moving left to right (rear to front) for clockwise
+                    const segmentT = t / topRunLength;
+                    linkX = rearTopX + (frontTopX - rearTopX) * segmentT;
+                    linkY = rearTopY + (frontTopY - rearTopY) * segmentT;
+                    linkAngle = centerAngle;
+                } else if (t < topRunLength + frontWrapLength) {
+                    // Front sprocket wrap (clockwise from top to bottom)
+                    const segmentT = (t - topRunLength) / frontWrapLength;
+                    const angle = frontTopAngle + Math.PI * segmentT;
+                    linkX = frontX + Math.cos(angle) * frontRadius;
+                    linkY = frontY + Math.sin(angle) * frontRadius;
+                    linkAngle = angle + Math.PI/2;
+                } else if (t < topRunLength + frontWrapLength + bottomRunLength) {
+                    // Bottom run - moving right to left (front to rear) for clockwise
+                    const segmentT = (t - topRunLength - frontWrapLength) / bottomRunLength;
+                    const sagAmount = 18 * Math.sin(segmentT * Math.PI); // Adjusted sag for larger scale
+                    linkX = frontBottomX + (rearBottomX - frontBottomX) * segmentT;
+                    linkY = frontBottomY + (rearBottomY - frontBottomY) * segmentT + sagAmount;
+                    linkAngle = centerAngle + Math.PI;
+                } else {
+                    // Rear sprocket wrap (clockwise from bottom to top)
+                    const segmentT = (t - topRunLength - frontWrapLength - bottomRunLength) / rearWrapLength;
+                    const angle = rearBottomAngle + Math.PI * segmentT;
+                    linkX = rearX + Math.cos(angle) * rearRadius;
+                    linkY = rearY + Math.sin(angle) * rearRadius;
+                    linkAngle = angle + Math.PI/2;
+                }
+                
+                // Draw outer plates (every other link)
+                if (i % 2 === 0) {
+                    ctx.save();
+                    ctx.translate(linkX, linkY);
+                    ctx.rotate(linkAngle);
+                    
+                    // Outer plate shape - scaled up for better visibility
+                    ctx.fillStyle = '#505050';
+                    ctx.strokeStyle = '#303030';
+                    ctx.lineWidth = 0.5;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(-7, -3.5);
+                    ctx.lineTo(7, -3.5);
+                    ctx.quadraticCurveTo(9, -3.5, 9, 0);
+                    ctx.quadraticCurveTo(9, 3.5, 7, 3.5);
+                    ctx.lineTo(-7, 3.5);
+                    ctx.quadraticCurveTo(-9, 3.5, -9, 0);
+                    ctx.quadraticCurveTo(-9, -3.5, -7, -3.5);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Rivets
+                    ctx.fillStyle = '#202020';
+                    ctx.beginPath();
+                    ctx.arc(-4, 0, 1.3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(4, 0, 1.3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.restore();
+                } else {
+                    // Inner plates
+                    ctx.save();
+                    ctx.translate(linkX, linkY);
+                    ctx.rotate(linkAngle);
+                    
+                    // Inner plate shape (slightly smaller) - scaled up
+                    ctx.fillStyle = '#606060';
+                    ctx.strokeStyle = '#404040';
+                    ctx.lineWidth = 0.5;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(-6, -3);
+                    ctx.lineTo(6, -3);
+                    ctx.quadraticCurveTo(8, -3, 8, 0);
+                    ctx.quadraticCurveTo(8, 3, 6, 3);
+                    ctx.lineTo(-6, 3);
+                    ctx.quadraticCurveTo(-8, 3, -8, 0);
+                    ctx.quadraticCurveTo(-8, -3, -6, -3);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Center roller with metallic effect - scaled up
+                    const rollerGradient = ctx.createRadialGradient(0, -0.5, 0, 0, 0, 2.5);
+                    rollerGradient.addColorStop(0, '#a0a0a0');
+                    rollerGradient.addColorStop(1, '#606060');
+                    ctx.fillStyle = rollerGradient;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.restore();
+                }
+            }
+        }
+
+        // Draw center spindles/axles
+        function drawSpindles() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Rear hub/freehub body - scaled up
+            ctx.beginPath();
+            ctx.arc(centerX + bike.rearCassette.x, centerY + bike.rearCassette.y, 18, 0, Math.PI * 2);
+            ctx.fillStyle = '#303030';
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Front bottom bracket spindle - scaled up
+            ctx.beginPath();
+            ctx.arc(centerX + bike.frontChainrings.x, centerY + bike.frontChainrings.y, 22, 0, Math.PI * 2);
+            const bbGradient = ctx.createRadialGradient(
+                centerX + bike.frontChainrings.x, 
+                centerY + bike.frontChainrings.y, 
+                0,
+                centerX + bike.frontChainrings.x, 
+                centerY + bike.frontChainrings.y, 
+                22
+            );
+            bbGradient.addColorStop(0, '#606060');
+            bbGradient.addColorStop(1, '#303030');
+            ctx.fillStyle = bbGradient;
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        // Update time
+        function updateTime() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            
+            // Convert to 12-hour format
+            const hour12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+            
+            // Determine minute segment (0, 20, or 40)
+            const minuteSegment = Math.floor(minutes / 20);
+            
+            // Check if time changed
+            if (hour12 !== lastTime.hour || minuteSegment !== lastTime.minuteSegment) {
+                if (!animating) {
+                    currentHour = hour12;
+                    currentMinuteSegment = minuteSegment;
+                    animating = true;
+                    animationProgress = 0;
+                }
+                lastTime.hour = hour12;
+                lastTime.minuteSegment = minuteSegment;
+            }
+
+            // Update digital display
+            document.getElementById('digitalTime').innerHTML = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            const rearCog = bike.rearCassette.cogs[currentHour - 1];
+            const frontCog = bike.frontChainrings.cogs[currentMinuteSegment];
+            const gearRatio = (frontCog.teeth / rearCog.teeth).toFixed(2);
+            
+            document.getElementById('gearInfo').innerHTML = 
+                `Hour Gear: ${currentHour} (${rearCog.teeth}T)<br>` +
+                `Minute Range: ${currentMinuteSegment * 20}-${(currentMinuteSegment + 1) * 20 - 1} (${frontCog.teeth}T)<br>` +
+                `Gear Ratio: ${gearRatio} (${frontCog.teeth}/${rearCog.teeth})`;
+        }
+
+        // Animation loop
+        function animate() {
+            // Clear canvas with dark background
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update animation (clockwise rotation)
+            if (animating) {
+                animationProgress += 0.03;
+                wheelRotation += 0.12;  // Positive for clockwise
+                chainringRotation += 0.08;  // Positive for clockwise
+                
+                if (animationProgress >= 1) {
+                    animating = false;
+                    animationProgress = 0;
+                }
+            } else {
+                // Slow continuous clockwise rotation
+                wheelRotation += 0.003;  // Positive for clockwise
+                chainringRotation += 0.002;  // Positive for clockwise
+            }
+
+            // Draw center spindles
+            drawSpindles();
+
+            // Draw rear cassette (left side)
+            const rearActiveIndex = currentHour - 1;
+            drawCassette(
+                bike.rearCassette.x,
+                bike.rearCassette.y,
+                bike.rearCassette.cogs,
+                rearActiveIndex,
+                wheelRotation,
+                false
+            );
+
+            // Draw front chainrings (right side)
+            const frontActiveIndex = currentMinuteSegment;
+            drawCassette(
+                bike.frontChainrings.x,
+                bike.frontChainrings.y,
+                bike.frontChainrings.cogs,
+                frontActiveIndex,
+                chainringRotation,
+                true
+            );
+
+            // Draw chain (on top of cassettes)
+            drawChain();
+
+            // Update time
+            updateTime();
+
+            // Continue animation
+            requestAnimationFrame(animate);
+        }
+
+        // Initialize and start
+        initializeCogs();
+        animate();
+    </script>
+</body>
+</html>
